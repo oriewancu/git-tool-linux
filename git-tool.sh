@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 
 # ==============================================================================
-#  ARI-DEV INTERACTIVE GIT TUI (Soft Blue Edition + Bilingual EN/ID + NF Safe)
+#  ARI-DEV INTERACTIVE GIT TUI (Soft Blue Edition + Bilingual EN/ID + Long Path)
 # ==============================================================================
 
 # --- Deteksi bahasa sebelum memaksa LC_ALL ke UTF-8 ---
@@ -115,15 +115,15 @@ C_GREEN=$'\033[38;2;158;206;106m'    # #9ECE6A - Soft Sage Green
 C_AMBER=$'\033[38;2;224;175;104m'    # #E0AF68 - Soft Amber Warning
 C_RED=$'\033[38;2;247;118;142m'      # #F7768E - Soft Coral Red
 
-# Tema global FZF bergaya Soft Blue (2 spasi setelah prompt icon)
+# Tema global FZF bergaya Soft Blue (margin/padding ringkas agar ruang teks maksimal)
 export FZF_DEFAULT_OPTS="
   --ansi
   --layout=reverse
   --border=rounded
   --border-label-pos=3
   --info=inline-right
-  --margin=0,2
-  --padding=1,2
+  --margin=0,1
+  --padding=1,1
   --prompt='${IC_CHEV}  '
   --pointer='▌'
   --marker='┃'
@@ -132,11 +132,33 @@ export FZF_DEFAULT_OPTS="
   --color=spinner:#7dcfff,header:#7aa2f7,border:#3d59a1,label:#7dcfff
 "
 
-# Helper wrapper FZF dengan label header dinamis & jarak aman ikon
+# Deteksi opsi FZF untuk long path secara kompatibel lintas versi
+FZF_PATH_OPTS=()
+FZF_HELP_OUT=$(fzf --help 2>/dev/null || true)
+if grep -q -- '--wrap' <<<"$FZF_HELP_OUT"; then
+  FZF_PATH_OPTS+=(--wrap)
+elif grep -q -- '--keep-right' <<<"$FZF_HELP_OUT"; then
+  FZF_PATH_OPTS+=(--keep-right)
+fi
+if grep -q -- '--ellipsis' <<<"$FZF_HELP_OUT"; then
+  FZF_PATH_OPTS+=(--ellipsis='…')
+fi
+
+# Helper wrapper FZF standar
 tui_fzf() {
   local label="$1"
   shift
   fzf --border-label=" ${IC_GIT}  ${label} " "$@"
+}
+
+# Helper wrapper FZF khusus daftar file/folder ber-path panjang (full width + preview bawah)
+tui_fzf_path() {
+  local label="$1"
+  shift
+  tui_fzf "$label" \
+    --preview-window="down:55%:wrap" \
+    "${FZF_PATH_OPTS[@]}" \
+    "$@"
 }
 
 # Helper 2-kolom untuk hint shortcut agar rata & berjarak jelas
@@ -235,6 +257,16 @@ is_dirty() {
 
 extract_status_file() {
   sed -E 's/^.. //; s/^.* -> //; s/^"(.*)"$/\1/'
+}
+
+truncate_str() {
+  local str="$1"
+  local max_len="$2"
+  if [ "$max_len" -gt 3 ] && [ "${#str}" -gt "$max_len" ]; then
+    printf '%s…' "${str:0:$((max_len - 1))}"
+  else
+    printf '%s' "$str"
+  fi
 }
 
 upstream_status() {
@@ -366,10 +398,15 @@ render_header() {
   local unstaged="$4"
 
   local term_cols
-  term_cols=$(tput cols 2>/dev/null || echo 84)
+  term_cols=$(tput cols 2>/dev/null || echo 100)
   local box_width=$((term_cols - 4))
-  [ "$box_width" -gt 96 ] && box_width=96
+  [ "$box_width" -gt 132 ] && box_width=132
   [ "$box_width" -lt 68 ] && box_width=68
+
+  local max_val_len=$((box_width - 24))
+  local safe_repo safe_branch
+  safe_repo=$(truncate_str "$repo_name" "$max_val_len")
+  safe_branch=$(truncate_str "$branch" "$max_val_len")
 
   local line_bar
   line_bar=$(printf '─%.0s' $(seq 1 $((box_width - 2))))
@@ -407,9 +444,9 @@ render_header() {
   echo -e "  ${C_BORDER}╭${line_bar}╮${C_RESET}"
   print_box_row "${C_BLUE}${C_BOLD}${IC_GIT}  ARI-DEV GIT WORKSPACE${C_RESET}   ${C_MUTED}•${C_RESET}   ${delta_badge}   ${C_MUTED}•${C_RESET}   ${lang_badge}" "$box_width"
   echo -e "  ${C_BORDER}├${line_bar}┤${C_RESET}"
-  print_box_row "${C_PERI}${IC_REPO}  ${lbl_repo}${C_MUTED}:${C_RESET} ${C_TEXT}${C_BOLD}${repo_name}${C_RESET}" "$box_width"
+  print_box_row "${C_PERI}${IC_REPO}  ${lbl_repo}${C_MUTED}:${C_RESET} ${C_TEXT}${C_BOLD}${safe_repo}${C_RESET}" "$box_width"
   print_box_row "${C_PERI}${IC_USER}  ${lbl_author}${C_MUTED}:${C_RESET} $(git_author_status)" "$box_width"
-  print_box_row "${C_PERI}${IC_GIT}  ${lbl_branch}${C_MUTED}:${C_RESET} ${C_SKY}${C_BOLD}${branch}${C_RESET}" "$box_width"
+  print_box_row "${C_PERI}${IC_GIT}  ${lbl_branch}${C_MUTED}:${C_RESET} ${C_SKY}${C_BOLD}${safe_branch}${C_RESET}" "$box_width"
   print_box_row "${C_PERI}${IC_SYNC}  ${lbl_upstream}${C_MUTED}:${C_RESET} $(upstream_status)" "$box_width"
   print_box_row "${C_PERI}${IC_STAGE}  ${lbl_changes}${C_MUTED}:${C_RESET} ${changes_str}" "$box_width"
   echo -e "  ${C_BORDER}╰${line_bar}╯${C_RESET}"
@@ -562,7 +599,7 @@ EOF
     ;;
 
   # ============================================================================
-  # DISCARD CHANGES (UNDO)
+  # DISCARD CHANGES (UNDO) - Full-width Long Path + Bottom Preview
   # ============================================================================
   *"Discard Changes (Undo)"* | *"Buang Perubahan (Undo)"*)
     DISCARD_HEADER=$(printf "%s\n%s\n%s\n%s" \
@@ -571,8 +608,8 @@ EOF
       "$(hint_2col "ESC" "$(tr_text "Cancel & return" "Batal & kembali")" "" "")" \
       "$(hint_divider)")
 
-    FILES_TO_DISCARD=$(git status --short | tui_fzf "$(tr_text "DISCARD CHANGES" "BUANG PERUBAHAN")" -m \
-      --height=74% \
+    FILES_TO_DISCARD=$(git status --short | tui_fzf_path "$(tr_text "DISCARD CHANGES" "BUANG PERUBAHAN")" -m \
+      --height=82% \
       --header="$DISCARD_HEADER" \
       --bind "ctrl-a:select-all" \
       --bind "ctrl-d:deselect-all" \
@@ -622,7 +659,7 @@ EOF
     ;;
 
   # ============================================================================
-  # VISUAL DIFF (BRANCH / FOLDER / FILE)
+  # VISUAL DIFF (BRANCH / FOLDER / FILE) - Full-width Long Path + Bottom Preview
   # ============================================================================
   *"Visual Diff"*)
     DIFF_MODE=$(printf "%s  %s\n%s  %s\n" \
@@ -632,11 +669,11 @@ EOF
     [ -z "$DIFF_MODE" ] && continue
 
     BR_A=$(git branch -a | sed 's/^[* ]*//; s/remotes\///' | sort -u | \
-      tui_fzf "$(tr_text "SELECT BRANCH A (BASE)" "PILIH BRANCH A (BASE)")" --height=48%)
+      tui_fzf "$(tr_text "SELECT BRANCH A (BASE)" "PILIH BRANCH A (BASE)")" --height=48% "${FZF_PATH_OPTS[@]}")
     [ -z "$BR_A" ] && continue
 
     BR_B=$(git branch -a | sed 's/^[* ]*//; s/remotes\///' | sort -u | \
-      tui_fzf "$(tr_text "SELECT BRANCH B (TARGET)" "PILIH BRANCH B (TARGET)")" --height=48%)
+      tui_fzf "$(tr_text "SELECT BRANCH B (TARGET)" "PILIH BRANCH B (TARGET)")" --height=48% "${FZF_PATH_OPTS[@]}")
     [ -z "$BR_B" ] && continue
 
     if [[ "$DIFF_MODE" == *"Folder"* ]]; then
@@ -646,10 +683,11 @@ EOF
         "$(hint_divider)")
 
       while true; do
-        SEL_FOLDER=$(find . -maxdepth 5 -type d -not -path '*/.*' | \
-          tui_fzf "FOLDER DIFF ($BR_A vs $BR_B)" \
-            --height=80% \
-            --header="$FOLDER_DIFF_HEADER")
+        SEL_FOLDER=$(find . -maxdepth 8 -type d -not -path '*/.*' | \
+          tui_fzf_path "FOLDER DIFF ($BR_A vs $BR_B)" \
+            --height=82% \
+            --header="$FOLDER_DIFF_HEADER" \
+            --preview "ls -la --color=always {} 2>/dev/null | head -40")
 
         [ -z "$SEL_FOLDER" ] && break
 
@@ -666,15 +704,18 @@ EOF
 
       while true; do
         SEL_FILE=$(git ls-tree -r "$BR_A" --name-only | \
-          tui_fzf "FILE DIFF ($BR_A vs $BR_B)" \
-            --height=80% \
+          tui_fzf_path "FILE DIFF ($BR_A vs $BR_B)" \
+            --height=82% \
             --header="$FILE_DIFF_HEADER" \
             --preview "git diff --color=always $BR_A $BR_B -- {1}")
 
         [ -z "$SEL_FILE" ] && break
 
+        SEL_FILE_BASE=$(basename "$SEL_FILE")
         ACTION=$(
-          cat <<EOF | tui_fzf "$(tr_text "REVIEW TOOL:" "TOOL REVIEW:") $SEL_FILE" --height=34%
+          cat <<EOF | tui_fzf "$(tr_text "REVIEW TOOL:" "TOOL REVIEW:") $SEL_FILE_BASE" \
+            --height=36% \
+            --header="${C_PERI}${IC_FILE}  ${SEL_FILE}${C_RESET}"
 ${IC_DIFF}  Visual Meld (Side-by-Side)
 ${IC_FILE}  Terminal View (Fast)
 ${IC_BACK}  $(tr_text "Cancel" "Batal")
@@ -727,6 +768,7 @@ EOF
           tui_fzf "$(tr_text "DELETE LOCAL BRANCHES" "HAPUS LOCAL BRANCHES")" -m \
             --height=70% \
             --header="$BULK_LOC_HEADER" \
+            "${FZF_PATH_OPTS[@]}" \
             --bind "ctrl-a:select-all" \
             --bind "ctrl-d:deselect-all")
 
@@ -763,6 +805,7 @@ EOF
           tui_fzf "$(tr_text "DELETE REMOTE BRANCHES" "HAPUS REMOTE BRANCHES") ($REMOTE_NAME)" -m \
             --height=70% \
             --header="$BULK_REM_HEADER" \
+            "${FZF_PATH_OPTS[@]}" \
             --bind "ctrl-a:select-all" \
             --bind "ctrl-d:deselect-all")
 
@@ -785,7 +828,7 @@ EOF
     ;;
 
   # ============================================================================
-  # STAGE & COMMIT
+  # STAGE & COMMIT - Full-width Long Path + Bottom Preview
   # ============================================================================
   *"Stage & Commit"*)
     STAGE_HEADER=$(printf "%s\n%s\n%s\n%s" \
@@ -794,8 +837,8 @@ EOF
       "$(hint_2col "CTRL-R" "$(tr_text "Unstage all files" "Unstage semua file")" "ESC" "$(tr_text "Cancel & return" "Batal & kembali")")" \
       "$(hint_divider)")
 
-    FILES=$(git status --short | tui_fzf "STAGE & COMMIT" -m \
-      --height=74% \
+    FILES=$(git status --short | tui_fzf_path "STAGE & COMMIT" -m \
+      --height=82% \
       --header="$STAGE_HEADER" \
       --bind "ctrl-a:select-all" \
       --bind "ctrl-d:deselect-all" \
@@ -1197,12 +1240,15 @@ EOF
     SELECTED_BRANCH=$(git branch -a | sed 's/^[* ] //' | sed 's#remotes/##' | sort -u | \
       tui_fzf "$(tr_text "SELECT BRANCH" "PILIH BRANCH")" --height=58% \
         --header="$BRANCH_SEL_HEADER" \
+        "${FZF_PATH_OPTS[@]}" \
         --preview "git log -n 15 --oneline --graph --color=always {}")
 
     [ -z "$SELECTED_BRANCH" ] && continue
 
     ACTION=$(
-      cat <<EOF | tui_fzf "$(tr_text "ACTION:" "AKSI:") $SELECTED_BRANCH" --height=40%
+      cat <<EOF | tui_fzf "$(tr_text "ACTION:" "AKSI:") $(basename "$SELECTED_BRANCH")" \
+        --height=40% \
+        --header="${C_PERI}${IC_GIT}  ${SELECTED_BRANCH}${C_RESET}"
 ${IC_GIT}  $(tr_text "Checkout to LOCAL" "Checkout ke LOCAL")
 ${IC_MERGE}  $(tr_text "Merge into active branch ($CURRENT_BRANCH)" "Merge ke branch aktif ($CURRENT_BRANCH)")
 ${IC_FIRE}  $(tr_text "Delete LOCAL Branch (Force)" "Hapus Branch LOCAL (Force)")
@@ -1401,18 +1447,21 @@ EOF
           FILE_LIST=$(git diff --name-only "$BASE_COMMIT" "$COMMIT_HASH")
 
           while true; do
-            FILE_PATH=$(echo "$FILE_LIST" | tui_fzf "$(tr_text "CHANGED FILES" "FILE BERUBAH") [$COMMIT_HASH]" \
-              --height=80% \
+            FILE_PATH=$(echo "$FILE_LIST" | tui_fzf_path "$(tr_text "CHANGED FILES" "FILE BERUBAH") [$COMMIT_HASH]" \
+              --height=82% \
               --preview "git diff --color=always $BASE_COMMIT $COMMIT_HASH -- {1} | sed '1,4d'")
 
             [ -z "$FILE_PATH" ] && break
 
+            FILE_BASE=$(basename "$FILE_PATH")
             TOOL_OPTS="${IC_DIFF}  Visual Meld (3-Way/Side-by-Side)\n"
             [ "$USE_KOMPARE" = true ] && TOOL_OPTS+="${IC_DIFF}  Visual Kompare (KDE Native)\n"
             TOOL_OPTS+="${IC_FILE}  Terminal View (Fast)\n"
             TOOL_OPTS+="${IC_BACK}  $(tr_text "Cancel" "Batal")"
 
-            TOOL_ACTION=$(echo -e "$TOOL_OPTS" | tui_fzf "$(tr_text "OPEN" "BUKA") '$FILE_PATH'" --height=34%)
+            TOOL_ACTION=$(echo -e "$TOOL_OPTS" | tui_fzf "$(tr_text "OPEN" "BUKA") '$FILE_BASE'" \
+              --height=36% \
+              --header="${C_PERI}${IC_FILE}  ${FILE_PATH}${C_RESET}")
 
             case "$TOOL_ACTION" in
               *"Meld"*)
