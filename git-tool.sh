@@ -486,6 +486,7 @@ ${IC_ADD}  $(tr_text "Create New Branch" "Buat Branch Baru")
 ${IC_LINK}  $(tr_text "Set / Change Upstream" "Atur / Ubah Upstream")
 ${IC_USER}  $(tr_text "Git Author (Name & Email)" "Git Author (Nama & Email)")
 ${IC_STAGE}  $(tr_text "Stage & Commit" "Stage & Commit")
+${IC_MINUS}  $(tr_text "Unstage Changes" "Batalkan Stage Perubahan")
 ${IC_STAGE}  $(tr_text "Stash Changes" "Simpan Perubahan ke Stash")
 ${IC_PULL}  $(tr_text "Pop Stash" "Pop Stash")
 ${IC_TRASH}  $(tr_text "Discard Changes (Undo)" "Buang Perubahan (Undo)")
@@ -839,20 +840,38 @@ EOF
       "$(hint_2col "CTRL-R" "$(tr_text "Unstage all files" "Unstage semua file")" "ESC" "$(tr_text "Cancel & return" "Batal & kembali")")" \
       "$(hint_divider)")
 
-    FILES=$(git status --short | tui_fzf_path "STAGE & COMMIT" -m \
+    STAGE_STATUS_LIST=$(git status --short | awk '
+      {
+        status = substr($0, 1, 2)
+        path = substr($0, 4)
+        staged = substr(status, 1, 1) != " " && substr(status, 1, 1) != "?"
+        unstaged = substr(status, 2, 1) != " " || status == "??"
+        marker = ""
+        if (staged) marker = "[STAGED]"
+        if (unstaged) marker = marker (marker ? " " : "") "[UNSTAGED]"
+        print status "\t" marker "\t" path
+      }')
+
+    FILES=$(printf '%s\n' "$STAGE_STATUS_LIST" | tui_fzf_path "STAGE & COMMIT" -m \
       --height=82% \
       --header="$STAGE_HEADER" \
+      --delimiter=$'\t' \
+      --with-nth=2.. \
       --bind "ctrl-a:select-all" \
       --bind "ctrl-d:deselect-all" \
-      --bind "ctrl-r:execute(git reset)+reload(git status --short)" \
+      --bind "ctrl-r:execute(git reset)+reload(git status --short | awk '{ status = substr(\$0, 1, 2); path = substr(\$0, 4); staged = substr(status, 1, 1) != \" \" && substr(status, 1, 1) != \"?\"; unstaged = substr(status, 2, 1) != \" \" || status == \"??\"; marker = \"\"; if (staged) marker = \"[STAGED]\"; if (unstaged) marker = marker (marker ? \" \" : \"\") \"[UNSTAGED]\"; print status \"\\t\" marker \"\\t\" path }')" \
       --preview "
-        file=\$(echo {} | sed -E 's/^.. //; s/^.* -> //; s/^\"(.*)\"\$/\1/')
-        if git diff --cached --quiet -- \"\$file\" 2>/dev/null; then
-          git diff --color=always -- \"\$file\" | sed '1,4d'
-        else
+        line=\$(printf '%s\n' {})
+        status=\$(printf '%s\n' \"\$line\" | cut -f1)
+        file=\$(printf '%s\n' \"\$line\" | cut -f3-)
+        file=\${file##* -> }
+        if [[ \${status:0:1} != ' ' && \${status:0:1} != '?' ]]; then
           git diff --cached --color=always -- \"\$file\" | sed '1,4d'
         fi
-        if [[ {} == '??'* ]]; then head -n 100 \"\$file\" 2>/dev/null; fi
+        if [[ \${status:1:1} != ' ' || \$status == '??' ]]; then
+          git diff --color=always -- \"\$file\" | sed '1,4d'
+        fi
+        if [[ \$status == '??' ]]; then head -n 100 \"\$file\" 2>/dev/null; fi
       ")
 
     if [ -z "$FILES" ]; then
@@ -861,14 +880,16 @@ EOF
       continue
     fi
 
-    CLEAN_FILES=$(echo "$FILES" | extract_status_file)
-
     echo -e "\n  ${C_BLUE}${C_BOLD}${IC_STAGE}  $(tr_text "Preparing files to stage:" "Menyiapkan file untuk stage:")${C_RESET}"
-    echo "$CLEAN_FILES" | sed "s/^/    ${C_GREEN}${IC_PLUS}${C_RESET}  /"
+    while IFS=$'\t' read -r _ marker f; do
+      [ -n "$f" ] && echo -e "    ${C_GREEN}${IC_PLUS}${C_RESET}  ${C_MUTED}${marker}${C_RESET}  $f"
+    done <<< "$FILES"
 
-    while IFS= read -r f; do
-      [ -n "$f" ] && git add -- "$f"
-    done <<< "$CLEAN_FILES"
+    while IFS=$'\t' read -r _ _ f; do
+      [ -n "$f" ] || continue
+      f="${f##* -> }"
+      git add -- "$f"
+    done <<< "$FILES"
     msg_ok "$(tr_text "Files staged successfully." "File berhasil di-stage.")"
 
     echo -ne "\n  ${C_SKY}${IC_EDIT}  $(tr_text "Enter commit message (leave empty to cancel): " "Masukkan pesan commit (kosongkan untuk batal): ")${C_RESET}"
@@ -885,6 +906,62 @@ EOF
         [ -z "$CURRENT_BRANCH" ] && CURRENT_BRANCH=$(git branch --show-current)
         [ -n "$REMOTE" ] && git push "$REMOTE" "$CURRENT_BRANCH"
       fi
+    fi
+    pause_tui
+    ;;
+
+  # ============================================================================
+  # UNSTAGE CHANGES - Select staged files to return to the working tree
+  # ============================================================================
+  *"Unstage Changes"* | *"Batalkan Stage Perubahan"*)
+    if [ -z "$(git diff --cached --name-only)" ]; then
+      msg_info "$(tr_text "There are no staged changes to unstage." "Tidak ada perubahan staged untuk dibatalkan.")"
+      pause_tui
+      continue
+    fi
+
+    UNSTAGE_HEADER=$(printf "%s\n%s\n%s\n%s" \
+      "$(hint_2col "TAB" "$(tr_text "Toggle select file" "Tandai / Pilih file")" "CTRL-A" "$(tr_text "Select all files" "Pilih semua file")")" \
+      "$(hint_2col "ENTER" "$(tr_text "Unstage selected files" "Batalkan stage file terpilih")" "CTRL-D" "$(tr_text "Deselect all" "Batal pilih semua")")" \
+      "$(hint_2col "CTRL-R" "$(tr_text "Unstage all files" "Unstage semua file")" "ESC" "$(tr_text "Cancel & return" "Batal & kembali")")" \
+      "$(hint_divider)")
+
+    UNSTAGE_FILES=$(git diff --cached --name-only | tui_fzf_path "UNSTAGE CHANGES" -m \
+      --height=82% \
+      --header="$UNSTAGE_HEADER" \
+      --bind "ctrl-a:select-all" \
+      --bind "ctrl-d:deselect-all" \
+      --bind "ctrl-r:execute(git restore --staged .)+reload(git diff --cached --name-only)" \
+      --preview "
+        git diff --cached --color=always -- "{}" 2>/dev/null | sed '1,4d'
+      ")
+
+    if [ -z "$UNSTAGE_FILES" ]; then
+      msg_info "$(tr_text "Exited unstage menu." "Keluar dari menu unstage.")"
+      sleep 1
+      continue
+    fi
+
+    CLEAN_UNSTAGE_FILES="$UNSTAGE_FILES"
+    FAILED_UNSTAGE=0
+
+    echo -e "\n  ${C_BLUE}${C_BOLD}${IC_MINUS}  $(tr_text "Unstaging files:" "Membatalkan stage file:")${C_RESET}"
+    echo "$CLEAN_UNSTAGE_FILES" | sed "s/^/    ${C_AMBER}${IC_MINUS}${C_RESET}  /"
+
+    while IFS= read -r f; do
+      [ -n "$f" ] || continue
+      if git diff --cached --quiet -- "$f" 2>/dev/null; then
+        continue
+      fi
+      if git restore --staged -- "$f" 2>/dev/null || git reset HEAD -- "$f" &>/dev/null; then
+        continue
+      fi
+      FAILED_UNSTAGE=1
+      msg_err "$(tr_text "Failed to unstage:" "Gagal membatalkan stage:") $f"
+    done <<< "$CLEAN_UNSTAGE_FILES"
+
+    if [ "$FAILED_UNSTAGE" -eq 0 ]; then
+      msg_ok "$(tr_text "Selected files unstaged successfully." "File terpilih berhasil di-unstage.")"
     fi
     pause_tui
     ;;
@@ -1142,8 +1219,9 @@ EOF
     [ -z "$REMOTE" ] && continue
 
     PUSH_ACTION=$(
-      cat <<EOF | tui_fzf "$(tr_text "PUSH TO" "PUSH KE") '$REMOTE'" --height=36%
+      cat <<EOF | tui_fzf "$(tr_text "PUSH TO" "PUSH KE") '$REMOTE'" --height=40%
 ${IC_PUSH}  $(tr_text "Push active branch ($CURRENT_BRANCH)" "Push branch aktif ($CURRENT_BRANCH)")
+${IC_FIRE}  $(tr_text "Force push active branch (--force-with-lease)" "Force push branch aktif (--force-with-lease)")
 ${IC_GIT}  $(tr_text "Push all branches" "Push semua branch")
 ${IC_TAG}  $(tr_text "Push all tags" "Push semua tag")
 ${IC_BACK}  $(tr_text "Cancel" "Batal")
@@ -1151,6 +1229,19 @@ EOF
     )
 
     case "$PUSH_ACTION" in
+      *"Force push active branch"* | *"Force push branch aktif"*)
+        if [[ "$CURRENT_BRANCH" == "HEAD (detached)" ]]; then
+          msg_err "$(tr_text "Cannot force push while HEAD is detached." "Tidak dapat force push saat HEAD dalam kondisi detached.")"
+        elif confirm "$(tr_text "Force push '$CURRENT_BRANCH' to '$REMOTE'? This may overwrite remote history." "Force push '$CURRENT_BRANCH' ke '$REMOTE'? Ini dapat menimpa riwayat remote.")"; then
+          if git push --force-with-lease "$REMOTE" "$CURRENT_BRANCH"; then
+            msg_ok "$(tr_text "Force push completed." "Force push berhasil.")"
+          else
+            msg_err "$(tr_text "Force push failed." "Force push gagal.")"
+          fi
+        else
+          msg_warn "$(tr_text "Force push canceled." "Force push dibatalkan.")"
+        fi
+        ;;
       *"active branch"* | *"branch aktif"*) git push "$REMOTE" "$CURRENT_BRANCH" ;;
       *"all branches"* | *"semua branch"*) git push "$REMOTE" --all ;;
       *"all tags"* | *"semua tag"*) git push "$REMOTE" --tags ;;
