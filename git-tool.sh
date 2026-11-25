@@ -486,6 +486,8 @@ ${IC_ADD}  $(tr_text "Create New Branch" "Buat Branch Baru")
 ${IC_LINK}  $(tr_text "Set / Change Upstream" "Atur / Ubah Upstream")
 ${IC_USER}  $(tr_text "Git Author (Name & Email)" "Git Author (Nama & Email)")
 ${IC_STAGE}  $(tr_text "Stage & Commit" "Stage & Commit")
+${IC_STAGE}  $(tr_text "Stash Changes" "Simpan Perubahan ke Stash")
+${IC_PULL}  $(tr_text "Pop Stash" "Pop Stash")
 ${IC_TRASH}  $(tr_text "Discard Changes (Undo)" "Buang Perubahan (Undo)")
 ${IC_DIFF}  $(tr_text "Visual Diff (Branch / Folder / File)" "Visual Diff (Branch / Folder / File)")
 ${IC_FIRE}  $(tr_text "Bulk Delete Branches" "Hapus Massal Branch")
@@ -882,6 +884,56 @@ EOF
         REMOTE=$(git remote | tui_fzf "$(tr_text "PUSH TO REMOTE" "PUSH KE REMOTE")" --height=32%)
         [ -z "$CURRENT_BRANCH" ] && CURRENT_BRANCH=$(git branch --show-current)
         [ -n "$REMOTE" ] && git push "$REMOTE" "$CURRENT_BRANCH"
+      fi
+    fi
+    pause_tui
+    ;;
+
+  # ============================================================================
+  # STASH CHANGES
+  # ============================================================================
+  *"Stash Changes"* | *"Simpan Perubahan ke Stash"*)
+    if [ -z "$(git status --porcelain)" ]; then
+      msg_info "$(tr_text "There are no changes to stash." "Tidak ada perubahan untuk disimpan ke stash.")"
+    else
+      echo -ne "\n  ${C_SKY}${IC_STAGE}  $(tr_text "Stash message (leave empty for default): " "Pesan stash (kosongkan untuk pesan bawaan): ")${C_RESET}"
+      read -r STASH_MESSAGE
+
+      if [ -n "$STASH_MESSAGE" ]; then
+        if git stash push -m "$STASH_MESSAGE"; then
+          msg_ok "$(tr_text "Changes saved to stash." "Perubahan berhasil disimpan ke stash.")"
+        else
+          msg_err "$(tr_text "Failed to stash changes." "Gagal menyimpan perubahan ke stash.")"
+        fi
+      elif git stash push; then
+        msg_ok "$(tr_text "Changes saved to stash." "Perubahan berhasil disimpan ke stash.")"
+      else
+        msg_err "$(tr_text "Failed to stash changes." "Gagal menyimpan perubahan ke stash.")"
+      fi
+    fi
+    pause_tui
+    ;;
+
+  # ============================================================================
+  # POP STASH
+  # ============================================================================
+  *"Pop Stash"*)
+    STASH_LIST=$(git stash list --format='%gd %cr %s')
+    if [ -z "$STASH_LIST" ]; then
+      msg_info "$(tr_text "There are no stashes to pop." "Tidak ada stash untuk di-pop.")"
+    else
+      SELECTED_STASH=$(printf '%s\n' "$STASH_LIST" | \
+        tui_fzf "$(tr_text "SELECT STASH TO POP" "PILIH STASH UNTUK DI-POP")" \
+          --height=52% \
+          --header="$(hint_2col "ENTER" "$(tr_text "Pop selected stash" "Pop stash terpilih")" "ESC" "$(tr_text "Cancel" "Batal")")")
+
+      if [ -n "$SELECTED_STASH" ]; then
+        STASH_REF="${SELECTED_STASH%% *}"
+        if git stash pop "$STASH_REF"; then
+          msg_ok "$(tr_text "Stash applied and removed:" "Stash berhasil diterapkan dan dihapus:") $STASH_REF"
+        else
+          msg_err "$(tr_text "Could not pop stash. Resolve any conflicts; the stash is retained." "Stash gagal di-pop. Selesaikan konflik jika ada; stash tetap tersimpan.") $STASH_REF"
+        fi
       fi
     fi
     pause_tui

@@ -16,6 +16,7 @@ An interactive, bilingual (English / Bahasa Indonesia), true-color Git TUI (Term
 - **Bilingual Support**: Toggle instantly between **English** and **Bahasa Indonesia** (`--lang en|id` or via the TUI menu).
 - **Workspace Dashboard**: Live status of active repository, author config, branch name, upstream sync status, and staged/unstaged changes counter.
 - **Stage & Commit**: Interactive multi-file picker with diff previews, quick staging, commit messaging, and optional push.
+- **Git Stash**: Save working-tree changes with an optional message, then select and pop a stash from the interactive menu.
 - **Branch Management**: Checkout local/remote branches, create new branches with upstream tracking, and bulk delete local/remote branches safely.
 - **Conflict Resolution**: Integrated support for merge conflict resolution tools (`Sublime Merge`, `IntelliJ IDEA`, `Meld`).
 - **Visual Diffs**: Branch, folder, and file diffing using `meld` or `delta`.
